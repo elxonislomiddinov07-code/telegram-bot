@@ -17,26 +17,17 @@ CREATE TABLE IF NOT EXISTS users (
     id INTEGER PRIMARY KEY,
     coins INTEGER DEFAULT 0,
     diamonds INTEGER DEFAULT 0,
-    last_bonus INTEGER DEFAULT 0,
-    daily_click INTEGER DEFAULT 0,
-    game_limit INTEGER DEFAULT 0,
-    ref_by INTEGER DEFAULT 0
+    ref_by INTEGER DEFAULT 0,
+    refs INTEGER DEFAULT 0
 )
 """)
 conn.commit()
 
-# -------- SUB CHECK --------
-def check_sub(user_id):
-    try:
-        return bot.get_chat_member(CHANNEL, user_id).status in ["member","administrator","creator"]
-    except:
-        return False
-
 # -------- START --------
 @bot.message_handler(commands=['start'])
-def start(message):
-    user_id = message.from_user.id
-    args = message.text.split()
+def start(m):
+    user_id = m.from_user.id
+    args = m.text.split()
 
     cursor.execute("SELECT id FROM users WHERE id=?", (user_id,))
     if not cursor.fetchone():
@@ -45,26 +36,11 @@ def start(message):
         conn.commit()
 
         if ref != 0 and ref != user_id:
-            cursor.execute("UPDATE users SET coins=coins+10 WHERE id=?", (ref,))
+            cursor.execute("UPDATE users SET coins=coins+5, refs=refs+1 WHERE id=?", (ref,))
             conn.commit()
-            bot.send_message(ref,"🎉 Yangi referal +10 coin!")
+            bot.send_message(ref,"🎉 Referal +5 coin!")
 
-    if not check_sub(user_id):
-        markup = telebot.types.InlineKeyboardMarkup()
-        markup.add(
-            telebot.types.InlineKeyboardButton("📢 Obuna", url=f"https://t.me/{CHANNEL[1:]}"),
-            telebot.types.InlineKeyboardButton("✅ Tekshirish", callback_data="check")
-        )
-        bot.send_message(message.chat.id,"❌ Kanalga obuna bo‘ling!",reply_markup=markup)
-        return
-
-    menu(message.chat.id)
-
-@bot.callback_query_handler(func=lambda c: c.data=="check")
-def check(c):
-    if check_sub(c.from_user.id):
-        bot.send_message(c.message.chat.id,"✅ Tasdiqlandi!")
-        menu(c.message.chat.id)
+    menu(m.chat.id)
 
 # -------- MENU --------
 def menu(chat_id):
@@ -73,7 +49,7 @@ def menu(chat_id):
     markup.add("👥 Referal","🛒 Do‘kon")
     markup.add("🎰 O‘yin","🏆 Top")
     markup.add("💎 Almaz yechish")
-    bot.send_message(chat_id,"🏠 ASOSIY MENU",reply_markup=markup)
+    bot.send_message(chat_id,"🏠 MENU",reply_markup=markup)
 
 # -------- PROFIL --------
 @bot.message_handler(func=lambda m: m.text=="👤 Profil")
@@ -84,9 +60,6 @@ def profil(m):
     cursor.execute("SELECT coins, diamonds FROM users WHERE id=?", (user.id,))
     coins, dia = cursor.fetchone()
 
-    markup = telebot.types.InlineKeyboardMarkup()
-    markup.add(telebot.types.InlineKeyboardButton("📞 Admin bilan bog‘lanish", url="https://t.me/elxon1312"))
-
     bot.send_message(m.chat.id,
 f"""👤 PROFIL
 
@@ -95,7 +68,9 @@ f"""👤 PROFIL
 
 💰 Coin: {coins}
 💎 Almaz: {dia}
-""",reply_markup=markup)
+
+📞 Admin: @elxon1312
+""")
 
 # -------- ISHLASH --------
 @bot.message_handler(func=lambda m: m.text=="💰 Ishlash")
@@ -104,23 +79,27 @@ def earn(m):
     markup.add(
         telebot.types.InlineKeyboardButton("🪙 Bosish",callback_data="coin"),
         telebot.types.InlineKeyboardButton("🎁 Bonus",callback_data="bonus"),
-        telebot.types.InlineKeyboardButton("💎 Almazga aylantirish",callback_data="convert")
+        telebot.types.InlineKeyboardButton("💎 Convert",callback_data="convert")
     )
     bot.send_message(m.chat.id,"💰 Ishlash",reply_markup=markup)
 
 # -------- COIN --------
 @bot.callback_query_handler(func=lambda c:c.data=="coin")
 def coin(c):
-    cursor.execute("SELECT daily_click FROM users WHERE id=?", (c.from_user.id,))
-    count = cursor.fetchone()[0]
-
-    if count >= 50:
-        bot.answer_callback_query(c.id,"❌ Kunlik limit tugadi")
-        return
-
-    cursor.execute("UPDATE users SET coins=coins+1,daily_click=daily_click+1 WHERE id=?", (c.from_user.id,))
+    cursor.execute("UPDATE users SET coins=coins+1 WHERE id=?", (c.from_user.id,))
     conn.commit()
-    bot.answer_callback_query(c.id,f"🪙 +1 ({50-count-1} qoldi)")
+
+    cursor.execute("SELECT coins, diamonds FROM users WHERE id=?", (c.from_user.id,))
+    coins, dia = cursor.fetchone()
+
+    bot.answer_callback_query(c.id,f"💰 {coins} | 💎 {dia}")
+
+# -------- BONUS --------
+@bot.callback_query_handler(func=lambda c:c.data=="bonus")
+def bonus(c):
+    cursor.execute("UPDATE users SET coins=coins+5 WHERE id=?", (c.from_user.id,))
+    conn.commit()
+    bot.answer_callback_query(c.id,"🎁 +5 coin")
 
 # -------- CONVERT --------
 @bot.callback_query_handler(func=lambda c:c.data=="convert")
@@ -128,67 +107,47 @@ def convert(c):
     cursor.execute("SELECT coins FROM users WHERE id=?", (c.from_user.id,))
     coins = cursor.fetchone()[0]
 
-    if coins>=10:
-        cursor.execute("UPDATE users SET coins=coins-10, diamonds=diamonds+1 WHERE id=?", (c.from_user.id,))
+    if coins>=100:
+        cursor.execute("UPDATE users SET coins=coins-100, diamonds=diamonds+10 WHERE id=?", (c.from_user.id,))
         conn.commit()
-        bot.answer_callback_query(c.id,"💎 1 almaz")
+        bot.answer_callback_query(c.id,"💎 +10 almaz")
     else:
-        bot.answer_callback_query(c.id,"❌ 10 coin kerak",True)
+        bot.answer_callback_query(c.id,"❌ 100 coin kerak",True)
 
 # -------- REFERAL --------
 @bot.message_handler(func=lambda m: m.text=="👥 Referal")
 def ref(m):
+    cursor.execute("SELECT refs FROM users WHERE id=?", (m.from_user.id,))
+    refs = cursor.fetchone()[0]
+
     link = f"https://t.me/{bot.get_me().username}?start={m.from_user.id}"
 
     markup = telebot.types.InlineKeyboardMarkup()
-    markup.add(telebot.types.InlineKeyboardButton("📢 Do‘stlarni taklif qilish", url=link))
+    markup.add(telebot.types.InlineKeyboardButton("📢 Do‘st taklif qilish", url=link))
 
-    bot.send_message(m.chat.id,f"🔗 Sizning havola:\n{link}",reply_markup=markup)
+    bot.send_message(m.chat.id,
+f"""👥 REFERAL
 
-# -------- REFERAL CHECK --------
-def check_unsub():
-    while True:
-        cursor.execute("SELECT id, ref_by FROM users WHERE ref_by!=0")
-        users = cursor.fetchall()
+👥 Taklif qilingan: {refs}
+💰 Har biri: +5 coin
 
-        for uid, ref in users:
-            if not check_sub(uid):
-                cursor.execute("UPDATE users SET ref_by=0 WHERE id=?", (uid,))
-                cursor.execute("UPDATE users SET coins=coins-10 WHERE id=?", (ref,))
-                conn.commit()
-
-                try:
-                    bot.send_message(ref,"❌ Referalingiz chiqib ketdi (-10 coin)")
-                except:
-                    pass
-
-        time.sleep(60)
-
-import threading
-threading.Thread(target=check_unsub).start()
+🔗 Havola:
+{link}
+""",reply_markup=markup)
 
 # -------- SLOT --------
 @bot.message_handler(func=lambda m: m.text=="🎰 O‘yin")
 def game(m):
-    cursor.execute("SELECT game_limit FROM users WHERE id=?", (m.from_user.id,))
-    limit = cursor.fetchone()[0]
-
-    if limit>=10:
-        bot.send_message(m.chat.id,"❌ Limit tugadi")
-        return
-
     res = [random.choice(["7","🍒","⭐"]) for _ in range(3)]
 
     if res.count("7")==3:
         cursor.execute("UPDATE users SET coins=coins+20 WHERE id=?", (m.from_user.id,))
-        result = "🎉 JACKPOT +20 coin!"
+        conn.commit()
+        result = "🎉 +20 coin"
     else:
         result = "😢 Yutmadi"
 
-    cursor.execute("UPDATE users SET game_limit=game_limit+1 WHERE id=?", (m.from_user.id,))
-    conn.commit()
-
-    bot.send_message(m.chat.id,f"🎰 {' | '.join(res)}\n{result}\nQoldi: {10-limit-1}")
+    bot.send_message(m.chat.id,f"🎰 {' | '.join(res)}\n{result}")
 
 # -------- TOP --------
 @bot.message_handler(func=lambda m: m.text=="🏆 Top")
@@ -206,40 +165,36 @@ def top(m):
 @bot.message_handler(func=lambda m: m.text=="🛒 Do‘kon")
 def shop(m):
     markup = telebot.types.InlineKeyboardMarkup()
-    markup.add(
-        telebot.types.InlineKeyboardButton("💎 100",callback_data="buy_100"),
-        telebot.types.InlineKeyboardButton("💎 310",callback_data="buy_310"),
-        telebot.types.InlineKeyboardButton("💎 520",callback_data="buy_520")
-    )
-    markup.add(
-        telebot.types.InlineKeyboardButton("📅 Haftalik",callback_data="buy_week"),
-        telebot.types.InlineKeyboardButton("📅 Oylik",callback_data="buy_month")
-    )
-    markup.add(
-        telebot.types.InlineKeyboardButton("⚡ EVO 3 kun",callback_data="buy_evo3"),
-        telebot.types.InlineKeyboardButton("⚡ EVO 7 kun",callback_data="buy_evo7"),
-        telebot.types.InlineKeyboardButton("⚡ EVO 30 kun",callback_data="buy_evo30")
-    )
+
+    markup.add(telebot.types.InlineKeyboardButton("💎 100 = 13k",callback_data="buy_100"))
+    markup.add(telebot.types.InlineKeyboardButton("💎 310 = 40k",callback_data="buy_310"))
+    markup.add(telebot.types.InlineKeyboardButton("💎 520 = 65k",callback_data="buy_520"))
+
+    markup.add(telebot.types.InlineKeyboardButton("📅 Haftalik 28k",callback_data="buy_week"))
+    markup.add(telebot.types.InlineKeyboardButton("📅 Oylik 120k",callback_data="buy_month"))
+
+    markup.add(telebot.types.InlineKeyboardButton("⚡ EVO 3 kun 10k",callback_data="buy_evo3"))
+    markup.add(telebot.types.InlineKeyboardButton("⚡ EVO 7 kun 15k",callback_data="buy_evo7"))
+    markup.add(telebot.types.InlineKeyboardButton("⚡ EVO 30 kun 40k",callback_data="buy_evo30"))
 
     bot.send_message(m.chat.id,"🛒 Tanlang:",reply_markup=markup)
 
 @bot.callback_query_handler(func=lambda c:c.data.startswith("buy_"))
 def buy(c):
-    markup = telebot.types.InlineKeyboardMarkup()
-    markup.add(
-        telebot.types.InlineKeyboardButton("✅ Olaman",callback_data=f"confirm_{c.data}"),
-        telebot.types.InlineKeyboardButton("❌ Bekor",callback_data="cancel")
-    )
-    bot.send_message(c.message.chat.id,"Xarid qilmoqchimisiz?",reply_markup=markup)
+    user = c.from_user
+    username = f"@{user.username}" if user.username else "yo‘q"
 
-@bot.callback_query_handler(func=lambda c:c.data.startswith("confirm_"))
-def confirm(c):
-    bot.send_message(ADMIN_ID,f"🛒 BUY\n{c.from_user.id}\n{c.data}")
-    bot.send_message(c.message.chat.id,"✅ Admin tez orada yozadi")
+    bot.send_message(ADMIN_ID,
+f"""🛒 BUY
 
-@bot.callback_query_handler(func=lambda c:c.data=="cancel")
-def cancel(c):
-    menu(c.message.chat.id)
+👤 {username}
+🆔 {user.id}
+🔗 https://t.me/{user.username}
+
+📦 {c.data}
+""")
+
+    bot.send_message(c.message.chat.id,"✅ Admin yozadi")
 
 # -------- WD --------
 @bot.message_handler(func=lambda m: m.text=="💎 Almaz yechish")
@@ -248,15 +203,27 @@ def wd(m):
     dia = cursor.fetchone()[0]
 
     if dia < 100:
-        bot.send_message(m.chat.id,"❌ 100 almaz kerak")
+        bot.send_message(m.chat.id,"❌ 100 almaz yig‘ing")
         return
 
-    bot.send_message(m.chat.id,"🎮 ID yubor:")
+    bot.send_message(m.chat.id,"🎮 ID kiriting:")
     bot.register_next_step_handler(m,send_wd)
 
 def send_wd(m):
-    bot.send_message(ADMIN_ID,f"💎 YECHISH\n{m.from_user.id}\nID: {m.text}")
+    user = m.from_user
+    username = f"@{user.username}" if user.username else "yo‘q"
+
+    bot.send_message(ADMIN_ID,
+f"""💎 YECHISH
+
+👤 {username}
+🆔 {user.id}
+🔗 https://t.me/{user.username}
+
+🎮 ID: {m.text}
+""")
+
     bot.send_message(m.chat.id,"✅ Yuborildi")
 
-print("ULTRA PRO BOT 🚀")
+print("FINAL PRO BOT 🚀")
 bot.infinity_polling()
