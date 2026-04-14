@@ -20,38 +20,28 @@ CREATE TABLE IF NOT EXISTS users (
     diamonds INTEGER DEFAULT 0,
     last_bonus INTEGER DEFAULT 0,
     last_click INTEGER DEFAULT 0,
-    autocoin INTEGER DEFAULT 0,
+    game_limit INTEGER DEFAULT 0,
     ref_by INTEGER DEFAULT 0
 )
 """)
 conn.commit()
 
-# ---------------- CHECK SUB ----------------
+# -------- SUB CHECK --------
 def check_sub(user_id):
     try:
-        status = bot.get_chat_member(CHANNEL, user_id).status
-        return status in ["member", "administrator", "creator"]
+        return bot.get_chat_member(CHANNEL, user_id).status in ["member","administrator","creator"]
     except:
         return False
 
-# ---------------- START ----------------
+# -------- START --------
 @bot.message_handler(commands=['start'])
 def start(message):
     user_id = message.from_user.id
-    args = message.text.split()
 
     cursor.execute("SELECT id FROM users WHERE id=?", (user_id,))
-    user = cursor.fetchone()
-
-    if not user:
-        ref = int(args[1]) if len(args) > 1 else 0
-        cursor.execute("INSERT INTO users(id, ref_by) VALUES(?,?)", (user_id, ref))
+    if not cursor.fetchone():
+        cursor.execute("INSERT INTO users(id) VALUES(?)", (user_id,))
         conn.commit()
-
-        if ref != 0 and ref != user_id:
-            cursor.execute("UPDATE users SET coins=coins+10 WHERE id=?", (ref,))
-            conn.commit()
-            bot.send_message(ref, "🎉 Referal +10 coin!")
 
     if not check_sub(user_id):
         markup = telebot.types.InlineKeyboardMarkup()
@@ -64,205 +54,161 @@ def start(message):
 
     menu(message.chat.id)
 
-# ---------------- CHECK ----------------
-@bot.callback_query_handler(func=lambda call: call.data == "check")
-def check(call):
-    if check_sub(call.from_user.id):
-        bot.send_message(call.message.chat.id, "✅ Tasdiqlandi!")
-        menu(call.message.chat.id)
-    else:
-        bot.answer_callback_query(call.id, "❌ Obuna bo‘ling!", True)
+@bot.callback_query_handler(func=lambda c: c.data=="check")
+def check(c):
+    if check_sub(c.from_user.id):
+        bot.send_message(c.message.chat.id, "✅ Tasdiqlandi!")
+        menu(c.message.chat.id)
 
-# ---------------- MENU ----------------
+# -------- MENU --------
 def menu(chat_id):
     markup = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True)
-    markup.add("💰 Ishlash", "👤 Profil")
-    markup.add("👥 Referal", "🛒 Do‘kon")
-    markup.add("🎮 O‘yin", "🏆 Top")
-    markup.add("💸 Pul yechish")
+    markup.add("💰 Ishlash","👤 Profil")
+    markup.add("👥 Referal","🛒 Do‘kon")
+    markup.add("🎰 O‘yin","🏆 Top")
+    markup.add("💎 Almaz yechish")
+    bot.send_message(chat_id,"🏠 Asosiy menyu",reply_markup=markup)
 
-    bot.send_message(chat_id, "🏠 MENU", reply_markup=markup)
+# -------- PROFIL --------
+@bot.message_handler(func=lambda m: m.text=="👤 Profil")
+def profil(m):
+    user = m.from_user
+    username = f"@{user.username}" if user.username else "yo‘q"
 
-# ---------------- PROFIL ----------------
-@bot.message_handler(func=lambda m: m.text == "👤 Profil")
-def profile(message):
-    cursor.execute("SELECT coins, diamonds FROM users WHERE id=?", (message.from_user.id,))
-    coins, diamonds = cursor.fetchone()
-    bot.send_message(message.chat.id, f"👤 Profil\n💰 {coins}\n💎 {diamonds}")
+    cursor.execute("SELECT coins, diamonds FROM users WHERE id=?", (user.id,))
+    coins, dia = cursor.fetchone()
 
-# ---------------- EARN ----------------
-@bot.message_handler(func=lambda m: m.text == "💰 Ishlash")
-def earn(message):
+    bot.send_message(m.chat.id,
+f"""👤 PROFIL
+
+👤 {username}
+🆔 {user.id}
+
+💰 Coin: {coins}
+💎 Almaz: {dia}
+
+📞 Admin: @elxon1312
+""")
+
+# -------- ISHLASH --------
+@bot.message_handler(func=lambda m: m.text=="💰 Ishlash")
+def earn(m):
     markup = telebot.types.InlineKeyboardMarkup()
     markup.add(
-        telebot.types.InlineKeyboardButton("🪙 Coin", callback_data="coin"),
-        telebot.types.InlineKeyboardButton("🎁 Bonus", callback_data="bonus"),
-        telebot.types.InlineKeyboardButton("⚡ Autocoin", callback_data="auto")
+        telebot.types.InlineKeyboardButton("🪙 Bosish",callback_data="coin"),
+        telebot.types.InlineKeyboardButton("🎁 Bonus",callback_data="bonus"),
+        telebot.types.InlineKeyboardButton("💎 Almazga aylantirish",callback_data="convert")
     )
-    bot.send_message(message.chat.id, "💰 Ishlash", reply_markup=markup)
+    bot.send_message(m.chat.id,"💰 Ishlash bo‘limi",reply_markup=markup)
 
-# ---------------- COIN ----------------
-@bot.callback_query_handler(func=lambda call: call.data == "coin")
-def coin(call):
-    user_id = call.from_user.id
+# -------- COIN --------
+@bot.callback_query_handler(func=lambda c:c.data=="coin")
+def coin(c):
+    cursor.execute("UPDATE users SET coins=coins+1 WHERE id=?", (c.from_user.id,))
+    conn.commit()
+    bot.answer_callback_query(c.id,"🪙 +1 coin")
+
+# -------- BONUS --------
+@bot.callback_query_handler(func=lambda c:c.data=="bonus")
+def bonus(c):
     now = int(time.time())
-
-    cursor.execute("SELECT last_click FROM users WHERE id=?", (user_id,))
+    cursor.execute("SELECT last_bonus FROM users WHERE id=?", (c.from_user.id,))
     last = cursor.fetchone()[0]
 
-    if now - last < 2:
-        bot.answer_callback_query(call.id, "⏳ Sekinroq!")
+    if now-last>=86400:
+        cursor.execute("UPDATE users SET coins=coins+5,last_bonus=? WHERE id=?", (now,c.from_user.id))
+        conn.commit()
+        bot.answer_callback_query(c.id,"🎁 +5 coin")
+    else:
+        bot.answer_callback_query(c.id,"❌ Bugun oldingiz",True)
+
+# -------- CONVERT --------
+@bot.callback_query_handler(func=lambda c:c.data=="convert")
+def convert(c):
+    cursor.execute("SELECT coins FROM users WHERE id=?", (c.from_user.id,))
+    coins = cursor.fetchone()[0]
+
+    if coins>=10:
+        cursor.execute("UPDATE users SET coins=coins-10, diamonds=diamonds+1 WHERE id=?", (c.from_user.id,))
+        conn.commit()
+        bot.answer_callback_query(c.id,"💎 1 almaz oldingiz!")
+    else:
+        bot.answer_callback_query(c.id,"❌ 10 coin kerak",True)
+
+# -------- REFERAL --------
+@bot.message_handler(func=lambda m: m.text=="👥 Referal")
+def ref(m):
+    link = f"https://t.me/{bot.get_me().username}?start={m.from_user.id}"
+    bot.send_message(m.chat.id,
+f"""👥 REFERAL
+
+🔗 Havola:
+{link}
+
+📢 Do‘stlarni taklif qiling va coin oling!
+""")
+
+# -------- SLOT --------
+@bot.message_handler(func=lambda m: m.text=="🎰 O‘yin")
+def game(m):
+    cursor.execute("SELECT game_limit FROM users WHERE id=?", (m.from_user.id,))
+    limit = cursor.fetchone()[0]
+
+    if limit>=10:
+        bot.send_message(m.chat.id,"❌ Bugungi limit tugadi")
         return
 
-    cursor.execute("UPDATE users SET coins=coins+1, last_click=? WHERE id=?", (now, user_id))
+    res = [random.choice(["7","🍒","⭐"]) for _ in range(3)]
+    text = " | ".join(res)
+
+    if res.count("7")==3:
+        cursor.execute("UPDATE users SET coins=coins+3 WHERE id=?", (m.from_user.id,))
+        result = "🎉 YUTDI +3 coin"
+    else:
+        result = "😢 Yutmadi"
+
+    cursor.execute("UPDATE users SET game_limit=game_limit+1 WHERE id=?", (m.from_user.id,))
     conn.commit()
 
-    bot.answer_callback_query(call.id, "🪙 +1")
+    bot.send_message(m.chat.id,f"🎰 {text}\n{result}")
 
-# ---------------- BONUS ----------------
-@bot.callback_query_handler(func=lambda call: call.data == "bonus")
-def bonus(call):
-    user_id = call.from_user.id
-    now = int(time.time())
-
-    cursor.execute("SELECT last_bonus FROM users WHERE id=?", (user_id,))
-    last = cursor.fetchone()[0]
-
-    if now - last >= 86400:
-        cursor.execute("UPDATE users SET coins=coins+5, last_bonus=? WHERE id=?", (now, user_id))
-        conn.commit()
-        bot.answer_callback_query(call.id, "🎁 +5 coin!")
-    else:
-        bot.answer_callback_query(call.id, "❌ Oldingiz", True)
-
-# ---------------- AUTO ----------------
-@bot.callback_query_handler(func=lambda call: call.data == "auto")
-def auto(call):
-    cursor.execute("UPDATE users SET autocoin=1 WHERE id=?", (call.from_user.id,))
-    conn.commit()
-    bot.answer_callback_query(call.id, "⚡ Yoqildi!")
-
-def auto_worker():
-    while True:
-        cursor.execute("SELECT id FROM users WHERE autocoin=1")
-        users = cursor.fetchall()
-
-        for u in users:
-            uid = u[0]
-            cursor.execute("UPDATE users SET coins=coins+1 WHERE id=?", (uid,))
-            conn.commit()
-            try:
-                bot.send_message(uid, "⚡ +1 coin")
-            except:
-                pass
-
-        time.sleep(3600)
-
-threading.Thread(target=auto_worker).start()
-
-# ---------------- REFERAL ----------------
-@bot.message_handler(func=lambda m: m.text == "👥 Referal")
-def ref(message):
-    link = f"https://t.me/{bot.get_me().username}?start={message.from_user.id}"
-    bot.send_message(message.chat.id, link)
-
-# ---------------- REFERAL MINUS ----------------
-def check_unsub():
-    while True:
-        cursor.execute("SELECT id, ref_by FROM users WHERE ref_by!=0")
-        users = cursor.fetchall()
-
-        for user_id, ref in users:
-            if not check_sub(user_id):
-                cursor.execute("UPDATE users SET ref_by=0 WHERE id=?", (user_id,))
-                cursor.execute("UPDATE users SET coins=coins-10 WHERE id=?", (ref,))
-                conn.commit()
-                try:
-                    bot.send_message(ref, "❌ Referal chiqdi -10 coin")
-                except:
-                    pass
-
-        time.sleep(60)
-
-threading.Thread(target=check_unsub).start()
-
-# ---------------- GAME ----------------
-@bot.message_handler(func=lambda m: m.text == "🎮 O‘yin")
-def game(message):
-    if random.choice([True, False]):
-        cursor.execute("UPDATE users SET coins=coins+3 WHERE id=?", (message.from_user.id,))
-        conn.commit()
-        bot.send_message(message.chat.id, "🎉 +3 coin")
-    else:
-        bot.send_message(message.chat.id, "😢 Yutqazding")
-
-# ---------------- TOP ----------------
-@bot.message_handler(func=lambda m: m.text == "🏆 Top")
-def top(message):
-    cursor.execute("SELECT id, coins FROM users ORDER BY coins DESC LIMIT 5")
+# -------- TOP --------
+@bot.message_handler(func=lambda m: m.text=="🏆 Top")
+def top(m):
+    cursor.execute("SELECT id,coins FROM users ORDER BY coins DESC LIMIT 5")
     data = cursor.fetchall()
 
-    text = "🏆 TOP\n"
-    for i, u in enumerate(data, 1):
-        text += f"{i}. {u[0]} — {u[1]}\n"
+    text="🏆 TOP\n\n"
+    for i,u in enumerate(data,1):
+        text+=f"{i}. {u[0]} ({u[0]}) — {u[1]} coin\n"
 
-    bot.send_message(message.chat.id, text)
+    bot.send_message(m.chat.id,text)
 
-# ---------------- SHOP ----------------
-@bot.message_handler(func=lambda m: m.text == "🛒 Do‘kon")
-def shop(message):
-    markup = telebot.types.InlineKeyboardMarkup()
-    markup.add(
-        telebot.types.InlineKeyboardButton("💎 100", callback_data="buy_100"),
-        telebot.types.InlineKeyboardButton("📅 Haftalik", callback_data="buy_week")
-    )
-    bot.send_message(message.chat.id, "🛒 Do‘kon", reply_markup=markup)
+# -------- SHOP --------
+@bot.message_handler(func=lambda m: m.text=="🛒 Do‘kon")
+def shop(m):
+    bot.send_message(m.chat.id,
+"""🛒 DO‘KON
 
-# ---------------- BUY ----------------
-@bot.callback_query_handler(func=lambda call: call.data.startswith("buy"))
-def buy(call):
-    user = call.from_user
-    username = user.username if user.username else "yo‘q"
+💎 100 = 13.000
+💎 310 = 40.000
+💎 520 = 65.000
 
-    bot.send_message(ADMIN_ID,
-        f"🛒 BUY\n👤 @{username}\n🆔 {user.id}\n📦 {call.data}"
-    )
-    bot.send_message(call.message.chat.id, "✅ Admin yozadi")
+📅 Haftalik = 28.000
+📅 Oylik = 120.000
 
-# ---------------- WITHDRAW ----------------
-@bot.message_handler(func=lambda m: m.text == "💸 Pul yechish")
-def withdraw(message):
-    bot.send_message(message.chat.id, "💳 Ma'lumot yubor:")
-    bot.register_next_step_handler(message, get_wd)
+📞 Sotib olish: @elxon1312
+""")
 
-def get_wd(message):
-    user = message.from_user
-    username = user.username if user.username else "yo‘q"
+# -------- WD --------
+@bot.message_handler(func=lambda m: m.text=="💎 Almaz yechish")
+def wd(m):
+    bot.send_message(m.chat.id,"🎮 O‘yin ID kiriting:")
+    bot.register_next_step_handler(m,send_wd)
 
-    bot.send_message(ADMIN_ID,
-        f"💸 WD\n👤 @{username}\n🆔 {user.id}\n📩 {message.text}"
-    )
-    bot.send_message(message.chat.id, "✅ Yuborildi")
+def send_wd(m):
+    bot.send_message(ADMIN_ID,f"💎 YECHISH\n🆔 {m.from_user.id}\n🎮 ID: {m.text}")
+    bot.send_message(m.chat.id,"✅ Yuborildi")
 
-# ---------------- BROADCAST ----------------
-@bot.message_handler(commands=['send'])
-def send_all(message):
-    if message.from_user.id != ADMIN_ID:
-        return
-
-    bot.send_message(message.chat.id, "Xabar yoz")
-    bot.register_next_step_handler(message, broadcast)
-
-def broadcast(message):
-    cursor.execute("SELECT id FROM users")
-    users = cursor.fetchall()
-
-    for u in users:
-        try:
-            bot.send_message(u[0], message.text)
-        except:
-            pass
-
-# ---------------- RUN ----------------
-print("BOT PRO ISHLAYAPTI 🚀")
+print("PRO BOT ISHLAYAPTI 🚀")
 bot.infinity_polling()
